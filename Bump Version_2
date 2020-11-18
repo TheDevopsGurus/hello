@@ -1,0 +1,112 @@
+#! /bin/bash
+
+# Regular expression describing the version tag
+REGEXP="v([0-9]+)[.]([0-9]+)[.]([0-9]+)"
+
+# Placeholder variable for the provided option (major|minor|patch)
+PROVIDED_OPTION=""
+
+# Placeholder variable for the path to the git repository
+GIT_DIRECTORY=""
+
+# Verifying how many parameters were passed to the script
+if [[ $# != 1 ]]; then
+    echo "You haven't provided the option (major|minor|patch) in the script parameter. Please provide it now:"
+    read PROVIDED_OPTION
+    echo "You've provided: '$PROVIDED_OPTION'"
+else
+    PROVIDED_OPTION=$1
+fi
+
+# Asking to provide the directory with the git repository
+echo "Please provide the path to the directory with the git repository:"
+read GIT_DIRECTORY
+echo "You've provided: '$GIT_DIRECTORY'"
+
+# Saving the current directory (from which the script was called)
+CURRENT_DIR=$(pwd)
+
+# Registering "trap" - to always come back to the same directory from which we've started
+trap "cd $CURRENT_DIR" EXIT
+
+# Checking if the path leads to the directory
+if [[ ! -d $GIT_DIRECTORY ]]; then
+    echo "Error: it seems that '$GIT_DIRECTORY' is not a correct path to the directory. Exiting."
+    exit 1
+fi
+
+# Going to the git repository directory
+cd $GIT_DIRECTORY
+
+# Verifying if the current directory is the valid git repository
+if [[ ! -d "./.git" ]]; then
+    echo "Error: it seems that the current directory ($(pwd)) is not a Git repository. Exiting."
+    exit 1
+fi
+
+# Verifying if there are any version tags (at least one)
+TAGS_COUNT=$(git tag --list 'v*' | wc -l)
+if [[ $TAGS_COUNT == 0 ]]; then
+    # if there was not tags - create new one and exit
+    echo "Info: no version tags in this repo. Creating default one: v1.0.0"
+    git tag -a -m "Version 1.0.0" "v1.0.0"
+    git push origin "v1.0.0"
+    exit 0
+fi
+
+# Showing the latest 5 tags
+git tag --sort=-v:refname --list 'v*' | head -n 5
+
+echo "Do you want to bump up the version? [yes]"
+read ANSWER
+ANSWER=${ANSWER,,}
+if [[ ! $ANSWER == "yes" ]]; then 
+	echo "You've cancelled the operation."
+	exit 0
+fi
+
+# retrieve the script parameter and verify it
+PROVIDED_OPTION="${PROVIDED_OPTION,,}"
+case $PROVIDED_OPTION in
+    major|minor|patch)
+        ;;
+    *)
+        echo "Error: unknown version part: '$PROVIDED_OPTION'. Exiting."
+        exit 1
+esac
+
+# Retrieve the latest version tag
+LATEST_TAG=$(git tag --sort=-v:refname --list 'v*' | head -n 1)
+
+# Verify if it matches the regexp
+if [[ $LATEST_TAG =~ $REGEXP ]]; then
+    # Split the version tag to the separate parts
+    MAJOR="${BASH_REMATCH[1]}"
+    MINOR="${BASH_REMATCH[2]}"
+    PATCH="${BASH_REMATCH[3]}"
+
+    # Increment the proper part and reset the following parts
+    case $PROVIDED_OPTION in
+        major)
+            MAJOR=$((MAJOR+1))
+            MINOR="0"
+            PATCH="0"
+            ;;
+        minor)
+            MINOR=$((MINOR+1))
+            PATCH="0"
+            ;;
+        patch)
+            PATCH=$((PATCH+1))
+            ;;
+    esac
+    # Bumping up the version
+    NEW_VERSION="v$MAJOR.$MINOR.$PATCH"
+    echo "Info: bumping version from $LATEST_TAG to: $NEW_VERSION"
+    git tag -a -m "Version $MAJOR.$MINOR.$PATCH" "$NEW_VERSION"
+    git push origin "$NEW_VERSION"
+else
+    # if the latest version tag does not match the regexp - print the error and exit
+    echo "Error: latest version tag does not match the expected regular expression: $REGEXP"
+    exit 1
+fi
